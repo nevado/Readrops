@@ -5,11 +5,13 @@ import androidx.room.Dao
 import androidx.room.MapColumn
 import androidx.room.Query
 import androidx.room.RawQuery
+import androidx.room.Update
 import androidx.sqlite.db.SupportSQLiteQuery
 import com.readrops.db.entities.Feed
 import com.readrops.db.entities.Folder
 import com.readrops.db.entities.Item
 import com.readrops.db.entities.ItemState
+import com.readrops.db.pojo.ItemContent
 import com.readrops.db.pojo.ItemWithFeed
 import kotlinx.coroutines.flow.Flow
 
@@ -81,4 +83,14 @@ interface ItemDao : BaseDao<Item> {
     @Query("""Select case When Exists(Select 1 From Item Inner Join Feed on Item.feed_id = Feed.id
         Where Item.remote_id = :remoteId And account_id = :accountId) Then 1 else 0 end""")
     suspend fun itemExists(remoteId: String, accountId: Int): Boolean
+
+    @Query("""Select Item.remote_id, Item.id From Item Inner Join Feed On Item.feed_id = Feed.id
+        Where Item.remote_id In (:remoteIds) And Feed.account_id = :accountId""")
+    suspend fun selectItemIdsByRemoteIds(
+        remoteIds: List<String>,
+        accountId: Int
+    ): Map<@MapColumn(columnName = "remote_id") String, @MapColumn(columnName = "id") Int>
+
+    @Update(entity = Item::class)
+    suspend fun updateItemsContent(items: List<ItemContent>)
 }

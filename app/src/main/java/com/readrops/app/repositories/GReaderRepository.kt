@@ -14,6 +14,7 @@ import com.readrops.db.entities.ItemState
 import com.readrops.db.entities.Tag
 import com.readrops.db.entities.TagJoin
 import com.readrops.db.entities.account.Account
+import com.readrops.db.pojo.ItemContent
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 
@@ -73,10 +74,10 @@ class GReaderRepository(
             val newFeeds = insertFeeds(feeds)
             val tags = insertTags(tags)
 
-            val newItems = insertItems(items, false)
+            val (newItems, updatedItems) = insertItems(items, false)
             insertItems(starredItems, true)
 
-            insertItemsTags(newItems, tags)
+            insertItemsTags(newItems, updatedItems, tags)
 
             insertItemsIds(unreadIds, readIds, starredIds.toMutableList())
 
@@ -147,11 +148,32 @@ class GReaderRepository(
         return database.tagDao().upsertTags(tags.map { it.copy(accountId = account.id) }, account)
     }
 
-    private suspend fun insertItems(items: List<Item>, starredItems: Boolean): List<Item> {
+    /**
+     * Insert new items and update the content of the ones already known locally.
+     *
+     * Since FreshRSS 1.29.0, the `ot` parameter also returns items modified since the last sync,
+     * with the same id, so they must not be inserted again.
+     *
+     * @return the inserted items and the updated items
+     */
+    private suspend fun insertItems(
+        items: List<Item>,
+        starredItems: Boolean
+    ): Pair<List<Item>, List<Item>> {
         val newItems = arrayListOf<Item>()
+        val updatedItems = arrayListOf<Item>()
         val itemsFeedsIds = mutableMapOf<String?, Int>()
 
-        for (item in items) {
+        // the same item can't be returned twice by the API, but better safe than sorry
+        val distinctItems = items.distinctBy { it.remoteId }
+        val existingItemIds = distinctItems.mapNotNull { it.remoteId }
+            .chunked(MAX_SQL_PARAMETERS)
+            .flatMap { remoteIds ->
+                database.itemDao().selectItemIdsByRemoteIds(remoteIds, account.id).entries
+            }
+            .associate { it.key to it.value }
+
+        for (item in distinctItems) {
             val feedId: Int
             if (itemsFeedsIds.containsKey(item.feedRemoteId)) {
                 feedId = itemsFeedsIds.getValue(item.feedRemoteId)
@@ -165,6 +187,13 @@ class GReaderRepository(
 
             if (item.text != null) {
                 item.readTime = Utils.readTimeFromString(item.text!!)
+            }
+
+            val existingId = existingItemIds[item.remoteId]
+            if (existingId != null) {
+                item.id = existingId
+                updatedItems += item
+                continue
             }
 
             // workaround to avoid inserting starred items coming from the main item call
@@ -185,11 +214,24 @@ class GReaderRepository(
                 .forEach { (id, item) -> item.id = id.toInt() }
         }
 
-        return newItems
+        if (updatedItems.isNotEmpty()) {
+            database.itemDao().updateItemsContent(updatedItems.map { ItemContent(it.id, it) })
+        }
+
+        return newItems to updatedItems
     }
 
-    private suspend fun insertItemsTags(newItems: List<Item>, allTags: List<Tag>) {
-        newItems.associate { it to it.tags }
+    private suspend fun insertItemsTags(
+        newItems: List<Item>,
+        updatedItems: List<Item>,
+        allTags: List<Tag>
+    ) {
+        // updated items tags are replaced by the ones coming from the API
+        updatedItems.map { it.id }
+            .chunked(MAX_SQL_PARAMETERS)
+            .forEach { database.tagJoinDao().deleteByItemIds(it) }
+
+        (newItems + updatedItems).associate { it to it.tags }
             .flatMap { (item, tags) ->
                 tags
                     .filter { tag -> allTags.any { tag.remoteId == it.remoteId } }
@@ -255,5 +297,10 @@ class GReaderRepository(
                 )
             })
         }
+    }
+
+    companion object {
+        // stay under SQLite bound parameters limit (999 before SQLite 3.32)
+        private const val MAX_SQL_PARAMETERS = 500
     }
 }
