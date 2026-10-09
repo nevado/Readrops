@@ -144,7 +144,8 @@ class LocalRSSRepository(
     private suspend fun insertNewItems(items: List<Item>, feed: Feed): List<Item> {
         val newItems = mutableListOf<Item>()
 
-        for (item in items) {
+        // a feed can contain the same entry more than once
+        for (item in items.distinctBy { it.remoteId }) {
             if (!database.itemDao().itemExists(item.remoteId!!, feed.accountId)) {
                 if (item.description != null) {
                     item.cleanDescription = Jsoup.parse(item.description!!).text()

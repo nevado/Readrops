@@ -70,7 +70,9 @@ class NextcloudNewsRepository(
 
             val initialSync = syncType == SyncType.INITIAL_SYNC
             val newItems = insertItems(items, initialSync)
-            insertItems(starredItems, initialSync)
+            // unread starred items are also part of the main items call,
+            // existence check is needed to avoid duplicates
+            insertItems(starredItems, false)
 
             account.lastModified = newLastModified
             database.accountDao().updateLastModified(newLastModified, account.id)
@@ -156,7 +158,7 @@ class NextcloudNewsRepository(
         val newItems = arrayListOf<Item>()
         val itemsFeedsIds = mutableMapOf<String?, Int>()
 
-        for (item in items) {
+        for (item in items.distinctBy { it.remoteId }) {
             val feedId: Int
             if (itemsFeedsIds.containsKey(item.feedRemoteId)) {
                 feedId = itemsFeedsIds.getValue(item.feedRemoteId)

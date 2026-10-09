@@ -34,7 +34,7 @@ import com.readrops.db.util.Converters
         ItemStateChange::class,
         ItemState::class
     ],
-    version = 6
+    version = 7
 )
 @TypeConverters(Converters::class)
 abstract class Database : RoomDatabase() {
@@ -145,5 +145,22 @@ object MigrationFrom4To5 : Migration(4, 5) {
 
         // add open_in_ask field
         db.execSQL("""ALTER TABLE `Feed` ADD `open_in_ask` INTEGER NOT NULL DEFAULT 1""")
+    }
+}
+
+object MigrationFrom6To7 : Migration(6, 7) {
+
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // remove duplicated items (FreshRSS >= 1.29.0 returns modified items again), keep the oldest one
+        // don't lose the starred state if it was only set on a duplicate
+        db.execSQL("""Update Item Set starred = 1 Where id In (Select Min(id) From Item Where remote_id Is Not Null 
+            Group By feed_id, remote_id Having Count(*) > 1 And Max(starred) = 1)""")
+        db.execSQL("""Delete From Item Where remote_id Is Not Null And id Not In 
+            (Select Min(id) From Item Where remote_id Is Not Null Group By feed_id, remote_id)""")
+        // foreign keys are not enforced during migrations
+        db.execSQL("Delete From TagJoin Where item_id Not In (Select id From Item)")
+
+        // add unique index to Item.(feed_id, remote_id)
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_Item_feed_id_remote_id` ON `Item` (`feed_id`, `remote_id`)")
     }
 }

@@ -212,7 +212,7 @@ class FeverRepository(
         val newItems = arrayListOf<Item>()
         val itemsFeedsIds = mutableMapOf<String?, Int>()
 
-        for (item in items) {
+        for (item in items.distinctBy { it.remoteId }) {
             val feedId: Int
             if (itemsFeedsIds.containsKey(item.feedRemoteId)) {
                 feedId = itemsFeedsIds.getValue(item.feedRemoteId)

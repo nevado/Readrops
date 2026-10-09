@@ -4,6 +4,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Ignore
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.time.LocalDateTime
 
@@ -15,6 +16,9 @@ import java.time.LocalDateTime
             childColumns = ["feed_id"],
             onDelete = ForeignKey.CASCADE
         )
+    ],
+    indices = [
+        Index(value = ["feed_id", "remote_id"], unique = true)
     ]
 )
 data class Item(
